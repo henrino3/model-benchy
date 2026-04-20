@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClawBench | Internal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+                    },
+                    colors: {
+                        gray: {
+                            900: '#111111', 800: '#1A1A1A', 700: '#2A2A2A', 600: '#4A4A4A',
+                            500: '#888888', 400: '#A1A1AA', 300: '#D4D4D8', 100: '#F4F4F5',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body { background-color: #000; color: #ededed; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .model-card { transition: all 0.2s ease; cursor: pointer; }
+        .model-card:hover { transform: translateY(-2px); border-color: #4A4A4A; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        function App() {
+            const [runs, setRuns] = React.useState([]);
+            const [selectedModel, setSelectedModel] = React.useState(null);
+            const [dashboardIndex, setDashboardIndex] = React.useState({ models: [], timeline: [], tasks: [] });
+            const [suiteMeta, setSuiteMeta] = React.useState({ current: 'v3', summary: {}, tracks: [], tasks: [], assumptions: [], taxonomyAdditions: [] });
+            const [viewMode, setViewMode] = React.useState('leaderboard');
+            const [loading, setLoading] = React.useState(true);
+
+            React.useEffect(() => {
+                fetch("/api/benchmarks")
+                    .then(res => res.json())
+                    .then(payload => {
+                        const data = payload.runs || [];
+                        setDashboardIndex(payload.index || { models: [], timeline: [], tasks: [] });
+                        setSuiteMeta(payload.suite || { current: 'v3', summary: {}, tracks: [], tasks: [], assumptions: [], taxonomyAdditions: [] });
+                        let allModels = [];
+                        
+                        data.forEach(b => {
+                            if (b.scored && b.scored.length > 0 && b.scored[0].model) {
+                                b.scored.forEach(m => allModels.push(processModelData(m.model, m, b, b.name)));
+                            } else if (b.scored && b.scored.length > 0) {
+                                let modelName = b.name.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/-benchmark.*$/, '');
+                                if (modelName === "qwenglm9") modelName = "Jackrong/MLX-Qwen3.5-9B-GLM5.1-Distill";
+                                if (modelName === "bonsai") modelName = "prism-ml/Bonsai-1.7B-gguf";
+                                allModels.push(processModelData(modelName, b.scored, b, b.name));
+                            }
+                        });
+
+                        const uniqueModels = {};
+                        allModels.forEach(m => {
+                            if (!uniqueModels[m.name] || uniqueModels[m.name].totalScore < m.totalScore) {
+                                uniqueModels[m.name] = m;
+                            }
+                        });
+
+                        setRuns(Object.values(uniqueModels).sort((a, b) => b.totalScore - a.totalScore));
+                        setLoading(false);
+                    })
+                    .catch(e => { console.error(e); setLoading(false); });
+            }, []);
+
+            function processModelData(modelName, scoredData, runData, runName) {
+                let tasks = [];
+                let totalScore = 0;
+                let maxScore = 0;
+
+                const isMulti = !Array.isArray(scoredData);
+                const taskScores = isMulti ? (scoredData.tasks || []) : scoredData;
+
+                taskScores.forEach(t => {
+                    const taskId = t.task || t.id;
+                    const rawTask = runData.raw?.find(r => (r.task_id === taskId && r.model === modelName) || (r.id === taskId && !isMulti));
+                    const score = t.score || 0;
+                    const mScore = t.max_score || 25;
+                    totalScore += score;
+                    maxScore += mScore;
+
+                    tasks.push({
+                        id: taskId, score, maxScore,
+                        notes: t.notes || "",
+                        prompt: rawTask?.prompt || '<Prompt missing>',
+                        response: t.response || rawTask?.response || rawTask?.answer || '<Empty>',
+                        time_sec: rawTask?.time_sec || rawTask?.seconds || t.seconds || 0,
+                        reasoning_len: rawTask?.reasoning_len || 0
+                    });
+                });
+
+                const tracks = { "Extraction": {score:0, max:0}, "Tool Routing": {score:0, max:0}, "Reasoning": {score:0, max:0}, "Summarization": {score:0, max:0}, "General": {score:0, max:0} };
+                
+                tasks.forEach(t => {
+                    let trackName = "General";
+                    if (t.id.includes("json") || t.id.includes("extract")) trackName = "Extraction";
+                    else if (t.id.includes("rout")) trackName = "Tool Routing";
+                    else if (t.id.includes("reason")) trackName = "Reasoning";
+                    else if (t.id.includes("summ")) trackName = "Summarization";
+
+                    tracks[trackName].score += t.score;
+                    tracks[trackName].max += t.maxScore;
+                });
+
+                return {
+                    name: modelName, runId: runName,
+                    date: runName.match(/^\d{4}-\d{2}-\d{2}/)?.[0] || 'Unknown',
+                    totalScore, maxScore,
+                    percentage: maxScore > 0 ? ((totalScore/maxScore)*100).toFixed(1) : 0,
+                    summary: runData.summary || "",
+                    tracks, allTasks: tasks,
+                    avgLatency: tasks.length > 0 ? (tasks.reduce((sum, t) => sum + t.time_sec, 0) / tasks.length).toFixed(1) : 0
+                };
+            }
+
+            if (loading) return <div className="flex h-screen items-center justify-center font-mono text-gray-500">Loading Benchmark Data...</div>;
+
+            return (
+                <div className="min-h-screen bg-[#0a0a0a] text-gray-300 font-sans selection:bg-blue-500/30">
+                    <header className="border-b border-gray-800 bg-[#111] sticky top-0 z-50">
+                        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+                            <div className="flex items-center gap-3 cursor-pointer" onClick={() => setSelectedModel(null)}>
+                                <span className="text-xl">🦞</span>
+                                <h1 className="text-lg font-semibold tracking-tight text-white">ClawBench Leaderboard</h1>
+                            </div>
+                            {selectedModel && (
+                                <button onClick={() => setSelectedModel(null)} className="text-sm font-mono text-gray-400 hover:text-white px-3 py-1 border border-gray-800 rounded-md hover:bg-gray-800">
+                                    ← Back
+                                </button>
+                            )}
+                        </div>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto px-6 py-10">
+                        {!selectedModel ? (
+                            <div className="space-y-6">
+                                <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <div className="bg-[#111] border border-gray-800 rounded-xl p-4">
+                                        <div className="text-xs uppercase tracking-widest text-gray-500 font-mono mb-2">Models</div>
+                                        <div className="text-3xl font-bold text-white">{dashboardIndex.models.length || runs.length}</div>
+                                    </div>
+                                    <div className="bg-[#111] border border-gray-800 rounded-xl p-4">
+                                        <div className="text-xs uppercase tracking-widest text-gray-500 font-mono mb-2">Benchmark runs</div>
+                                        <div className="text-3xl font-bold text-white">{dashboardIndex.timeline.length}</div>
+                                    </div>
+                                    <div className="bg-[#111] border border-gray-800 rounded-xl p-4">
+                                        <div className="text-xs uppercase tracking-widest text-gray-500 font-mono mb-2">Tracked tasks</div>
+                                        <div className="text-3xl font-bold text-white">{dashboardIndex.tasks.length}</div>
+                                    </div>
+                                    <div className="bg-[#111] border border-gray-800 rounded-xl p-4">
+                                        <div className="text-xs uppercase tracking-widest text-gray-500 font-mono mb-2">Latest run</div>
+                                        <div className="text-sm font-semibold text-white">{dashboardIndex.timeline[0]?.runId || '-'}</div>
+                                        <div className="text-xs font-mono text-gray-500 mt-1">{dashboardIndex.timeline[0]?.model || ''}</div>
+                                    </div>
+                                </section>
+                                <section className="bg-[#0f1720] border border-blue-500/20 rounded-2xl p-5 space-y-4">
+                                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                                        <div>
+                                            <div className="text-xs uppercase tracking-[0.2em] text-blue-300 font-mono mb-2">Current benchmark canon</div>
+                                            <h2 className="text-2xl font-bold text-white">Benchmark Suite {suiteMeta.current?.toUpperCase?.() || 'V3'}</h2>
+                                            <p className="text-sm text-gray-300 mt-2 max-w-3xl">{suiteMeta.summary?.tagline || 'Operator benchmark suite focused on real workspace failure modes, proof, and recovery.'}</p>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3 min-w-[220px]">
+                                            <div className="bg-black/30 border border-gray-800 rounded-xl p-3">
+                                                <div className="text-[11px] uppercase tracking-widest text-gray-500 font-mono mb-1">Base</div>
+                                                <div className="text-sm font-semibold text-white">{suiteMeta.summary?.base || 'V2 + V3 unified canon'}</div>
+                                            </div>
+                                            <div className="bg-black/30 border border-gray-800 rounded-xl p-3">
+                                                <div className="text-[11px] uppercase tracking-widest text-gray-500 font-mono mb-1">Total tracks</div>
+                                                <div className="text-sm font-semibold text-white">{suiteMeta.summary?.trackCount || suiteMeta.tracks?.length || 0}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        {(suiteMeta.tracks || []).map((track, idx) => (
+                                            <div key={idx} className="bg-black/25 border border-gray-800 rounded-xl p-4">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <div className="text-sm font-semibold text-white">{track.name}</div>
+                                                    <div className="text-xs font-mono text-blue-300">{track.weight}%</div>
+                                                </div>
+                                                <div className="text-xs text-gray-400 mt-2">{track.taskCount} tasks</div>
+                                                <ul className="mt-3 space-y-1 text-xs text-gray-300 font-mono">
+                                                    {(track.taskNames || []).slice(0, 3).map((name, taskIdx) => <li key={taskIdx}>• {name}</li>)}
+                                                </ul>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {(suiteMeta.assumptions || []).length > 0 && (
+                                        <div className="border border-amber-500/20 bg-amber-500/5 rounded-xl p-4">
+                                            <div className="text-xs uppercase tracking-widest text-amber-300 font-mono mb-2">Important note</div>
+                                            <ul className="space-y-1 text-sm text-amber-100/90">
+                                                {suiteMeta.assumptions.map((item, idx) => <li key={idx}>• {item}</li>)}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </section>
+                                <section className="bg-[#0f1720] border border-blue-500/20 rounded-2xl p-5 space-y-4">
+                                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                                        <div>
+                                            <div className="text-xs uppercase tracking-[0.2em] text-blue-300 font-mono mb-2">Current benchmark canon</div>
+                                            <h2 className="text-2xl font-bold text-white">Benchmark Suite {suiteMeta.current?.toUpperCase?.() || 'V3'}</h2>
+                                            <p className="text-sm text-gray-300 mt-2 max-w-3xl">{suiteMeta.summary?.tagline || 'Operator benchmark suite focused on real workspace failure modes, proof, and recovery.'}</p>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3 min-w-[220px]">
+                                            <div className="bg-black/30 border border-gray-800 rounded-xl p-3">
+                                                <div className="text-[11px] uppercase tracking-widest text-gray-500 font-mono mb-1">Base</div>
+                                                <div className="text-sm font-semibold text-white">{suiteMeta.summary?.base || 'V2 + V3 unified canon'}</div>
+                                            </div>
+                                            <div className="bg-black/30 border border-gray-800 rounded-xl p-3">
+                                                <div className="text-[11px] uppercase tracking-widest text-gray-500 font-mono mb-1">Total tracks</div>
+                                                <div className="text-sm font-semibold text-white">{suiteMeta.summary?.trackCount || suiteMeta.tracks?.length || 0}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        {(suiteMeta.tracks || []).map((track, idx) => (
+                                            <div key={idx} className="bg-black/25 border border-gray-800 rounded-xl p-4">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <div className="text-sm font-semibold text-white">{track.name}</div>
+                                                    <div className="text-xs font-mono text-blue-300">{track.weight}%</div>
+                                                </div>
+                                                <div className="text-xs text-gray-400 mt-2">{track.taskCount} tasks</div>
+                                                <ul className="mt-3 space-y-1 text-xs text-gray-300 font-mono">
+                                                    {(track.taskNames || []).slice(0, 3).map((name, taskIdx) => <li key={taskIdx}>• {name}</li>)}
+                                                </ul>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {(suiteMeta.assumptions || []).length > 0 && (
+                                        <div className="border border-amber-500/20 bg-amber-500/5 rounded-xl p-4">
+                                            <div className="text-xs uppercase tracking-widest text-amber-300 font-mono mb-2">Important note</div>
+                                            <ul className="space-y-1 text-sm text-amber-100/90">
+                                                {suiteMeta.assumptions.map((item, idx) => <li key={idx}>• {item}</li>)}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </section>
+                                <section className="flex flex-wrap gap-2">
+                                    {['leaderboard','tasks','timeline','suite'].map(mode => (
+                                        <button key={mode} onClick={() => setViewMode(mode)} className={`px-3 py-2 rounded-lg border text-sm font-mono ${viewMode === mode ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' : 'bg-[#111] text-gray-400 border-gray-800 hover:text-white hover:border-gray-700'}`}>
+                                            {mode}
+                                        </button>
+                                    ))}
+                                </section>
+                                {viewMode === 'leaderboard' ? (
+                                    <div className="animate-in fade-in duration-500">
+                                        <h2 className="text-2xl font-bold text-white mb-6">Model Leaderboard</h2>
+                                        <div className="border border-gray-800 rounded-xl overflow-hidden bg-[#111]">
+                                    <table className="w-full text-left border-collapse">
+                                        <thead>
+                                            <tr className="border-b border-gray-800 bg-black/50 text-xs font-mono text-gray-500 uppercase tracking-wider">
+                                                <th className="p-4 font-medium text-center">Rank</th>
+                                                <th className="p-4 font-medium">Model</th>
+                                                <th className="p-4 font-medium text-right">Score</th>
+                                                <th className="p-4 font-medium text-right">Extraction</th>
+                                                <th className="p-4 font-medium text-right">Routing</th>
+                                                <th className="p-4 font-medium text-right">Reasoning</th>
+                                                <th className="p-4 font-medium text-right">Summary</th>
+                                                <th className="p-4 font-medium text-right">Avg Latency</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-800/50">
+                                            {runs.map((model, idx) => (
+                                                <tr key={idx} onClick={() => setSelectedModel(model)} className="hover:bg-gray-800/30 cursor-pointer transition-colors group">
+                                                    <td className="p-4 font-mono text-gray-500 text-center">#{idx + 1}</td>
+                                                    <td className="p-4">
+                                                        <div className="font-semibold text-gray-200 group-hover:text-blue-400 transition-colors">{model.name}</div>
+                                                        <div className="text-xs text-gray-600 font-mono mt-1">{model.runId}</div>
+                                                    </td>
+                                                    <td className="p-4 text-right">
+                                                        <div className={`font-mono font-bold text-lg ${model.percentage >= 80 ? 'text-emerald-400' : model.percentage >= 50 ? 'text-amber-400' : 'text-rose-400'}`}>
+                                                            {model.percentage}%
+                                                        </div>
+                                                        <div className="text-xs text-gray-500 font-mono">{model.totalScore}/{model.maxScore}</div>
+                                                    </td>
+                                                    <td className="p-4 text-right font-mono text-gray-400 text-sm">
+                                                        {model.tracks["Extraction"].max > 0 ? Math.round((model.tracks["Extraction"].score / model.tracks["Extraction"].max)*100) + '%' : '-'}
+                                                    </td>
+                                                    <td className="p-4 text-right font-mono text-gray-400 text-sm">
+                                                        {model.tracks["Tool Routing"].max > 0 ? Math.round((model.tracks["Tool Routing"].score / model.tracks["Tool Routing"].max)*100) + '%' : '-'}
+                                                    </td>
+                                                    <td className="p-4 text-right font-mono text-gray-400 text-sm">
+                                                        {model.tracks["Reasoning"].max > 0 ? Math.round((model.tracks["Reasoning"].score / model.tracks["Reasoning"].max)*100) + '%' : '-'}
+                                                    </td>
+                                                    <td className="p-4 text-right font-mono text-gray-400 text-sm">
+                                                        {model.tracks["Summarization"].max > 0 ? Math.round((model.tracks["Summarization"].score / model.tracks["Summarization"].max)*100) + '%' : '-'}
+                                                    </td>
+                                                    <td className="p-4 text-right font-mono text-gray-500 text-sm">{model.avgLatency}s</td>
+                                                </tr>
+                                            ))}
+                                            {runs.length === 0 && (
+                                                <tr>
+                                                    <td colSpan="8" className="p-8 text-center text-gray-500 font-mono">No benchmarks found or API error.</td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                    </div>
+                                ) : viewMode === 'tasks' ? (
+                                    <div className="animate-in fade-in duration-500 space-y-4">
+                                        <h2 className="text-2xl font-bold text-white">Task heatmap</h2>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                            {dashboardIndex.tasks.map((task, idx) => (
+                                                <div key={idx} className="bg-[#111] border border-gray-800 rounded-xl p-4">
+                                                    <div className="flex items-center justify-between gap-4">
+                                                        <div className="font-mono text-sm text-gray-300">{task.task}</div>
+                                                        <div className={`text-sm font-bold font-mono ${task.avg_pct >= 80 ? 'text-emerald-400' : task.avg_pct >= 50 ? 'text-amber-400' : 'text-rose-400'}`}>{task.avg_pct}%</div>
+                                                    </div>
+                                                    <div className="mt-3 h-2 bg-black/40 rounded-full overflow-hidden">
+                                                        <div className={`h-full ${task.avg_pct >= 80 ? 'bg-emerald-500' : task.avg_pct >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${task.avg_pct}%` }} />
+                                                    </div>
+                                                    <div className="mt-3 flex justify-between text-xs font-mono text-gray-500">
+                                                        <span>{task.score}/{task.max_score}</span>
+                                                        <span>pass {task.pass_rate}%</span>
+                                                        <span>{task.runs} runs</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : viewMode === 'suite' ? (
+                                    <div className="animate-in fade-in duration-500 space-y-6">
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-white">Benchmark Suite {suiteMeta.current?.toUpperCase?.() || 'V3'}</h2>
+                                            <p className="text-sm text-gray-400 mt-2 max-w-4xl">{suiteMeta.summary?.description || suiteMeta.summary?.tagline}</p>
+                                        </div>
+                                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                                            {(suiteMeta.tracks || []).map((track, idx) => (
+                                                <div key={idx} className="bg-[#111] border border-gray-800 rounded-xl p-5 space-y-4">
+                                                    <div className="flex items-center justify-between gap-4">
+                                                        <div>
+                                                            <div className="text-xs uppercase tracking-widest text-gray-500 font-mono mb-1">Track</div>
+                                                            <div className="text-lg font-semibold text-white">{track.name}</div>
+                                                        </div>
+                                                        <div className="text-sm font-mono text-blue-300">{track.weight}%</div>
+                                                    </div>
+                                                    <div className="text-xs text-gray-500 font-mono">{track.id}</div>
+                                                    <div className="space-y-2">
+                                                        {(track.tasks || []).map((task, taskIdx) => (
+                                                            <div key={taskIdx} className="border border-gray-800 rounded-lg p-3 bg-black/20">
+                                                                <div className="text-sm font-medium text-gray-200">{task.name}</div>
+                                                                <div className="text-xs text-gray-500 font-mono mt-1">{task.id}</div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="bg-[#111] border border-gray-800 rounded-xl p-5">
+                                            <div className="text-xs uppercase tracking-widest text-gray-500 font-mono mb-3">Taxonomy additions</div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                                                {(suiteMeta.taxonomyAdditions || []).map((tax, idx) => (
+                                                    <div key={idx} className="border border-gray-800 rounded-lg p-3 bg-black/20">
+                                                        <div className="font-mono text-blue-300 text-sm">{tax.code}</div>
+                                                        <div className="text-sm text-gray-200 mt-1">{tax.name}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : viewMode === 'suite' ? (
+                                    <div className="animate-in fade-in duration-500 space-y-6">
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-white">Benchmark Suite {suiteMeta.current?.toUpperCase?.() || 'V3'}</h2>
+                                            <p className="text-sm text-gray-400 mt-2 max-w-4xl">{suiteMeta.summary?.description || suiteMeta.summary?.tagline}</p>
+                                        </div>
+                                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                                            {(suiteMeta.tracks || []).map((track, idx) => (
+                                                <div key={idx} className="bg-[#111] border border-gray-800 rounded-xl p-5 space-y-4">
+                                                    <div className="flex items-center justify-between gap-4">
+                                                        <div>
+                                                            <div className="text-xs uppercase tracking-widest text-gray-500 font-mono mb-1">Track</div>
+                                                            <div className="text-lg font-semibold text-white">{track.name}</div>
+                                                        </div>
+                                                        <div className="text-sm font-mono text-blue-300">{track.weight}%</div>
+                                                    </div>
+                                                    <div className="text-xs text-gray-500 font-mono">{track.id}</div>
+                                                    <div className="space-y-2">
+                                                        {(track.tasks || []).map((task, taskIdx) => (
+                                                            <div key={taskIdx} className="border border-gray-800 rounded-lg p-3 bg-black/20">
+                                                                <div className="text-sm font-medium text-gray-200">{task.name}</div>
+                                                                <div className="text-xs text-gray-500 font-mono mt-1">{task.id}</div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="bg-[#111] border border-gray-800 rounded-xl p-5">
+                                            <div className="text-xs uppercase tracking-widest text-gray-500 font-mono mb-3">Taxonomy additions</div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                                                {(suiteMeta.taxonomyAdditions || []).map((tax, idx) => (
+                                                    <div key={idx} className="border border-gray-800 rounded-lg p-3 bg-black/20">
+                                                        <div className="font-mono text-blue-300 text-sm">{tax.code}</div>
+                                                        <div className="text-sm text-gray-200 mt-1">{tax.name}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="animate-in fade-in duration-500 space-y-4">
+                                        <h2 className="text-2xl font-bold text-white">Run timeline</h2>
+                                        <div className="border border-gray-800 rounded-xl overflow-hidden bg-[#111]">
+                                            <table className="w-full text-left border-collapse">
+                                                <thead>
+                                                    <tr className="border-b border-gray-800 bg-black/50 text-xs font-mono text-gray-500 uppercase tracking-wider">
+                                                        <th className="p-4 font-medium">Date</th>
+                                                        <th className="p-4 font-medium">Run</th>
+                                                        <th className="p-4 font-medium">Model</th>
+                                                        <th className="p-4 font-medium text-right">Score</th>
+                                                        <th className="p-4 font-medium text-right">Latency</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-800/50">
+                                                    {dashboardIndex.timeline.map((item, idx) => (
+                                                        <tr key={idx} className="hover:bg-gray-800/30">
+                                                            <td className="p-4 text-sm font-mono text-gray-400">{item.date}</td>
+                                                            <td className="p-4 text-sm text-gray-200">{item.runId}</td>
+                                                            <td className="p-4 text-sm text-gray-300">{item.model}</td>
+                                                            <td className="p-4 text-right">
+                                                                <span className={`font-mono font-bold ${item.percentage >= 80 ? 'text-emerald-400' : item.percentage >= 50 ? 'text-amber-400' : 'text-rose-400'}`}>{item.percentage}%</span>
+                                                                <div className="text-xs text-gray-500 font-mono">{item.score}/{item.maxScore}</div>
+                                                            </td>
+                                                            <td className="p-4 text-right font-mono text-gray-500 text-sm">{item.avgLatency}s</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="animate-in slide-in-from-right-8 duration-300">
+                                <div className="mb-10">
+                                    <div className="flex items-baseline gap-4 mb-3">
+                                        <h2 className="text-4xl font-bold text-white tracking-tight">{selectedModel.name}</h2>
+                                        <span className={`px-3 py-1 rounded-full text-sm font-bold font-mono border ${selectedModel.percentage >= 80 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : selectedModel.percentage >= 50 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'}`}>
+                                            {selectedModel.percentage}%
+                                        </span>
+                                    </div>
+                                    <div className="text-sm font-mono text-gray-500">
+                                        Run: {selectedModel.runId} | Date: {selectedModel.date} | Avg Latency: {selectedModel.avgLatency}s
+                                    </div>
+                                </div>
+
+                                <div className="space-y-8">
+                                    <h3 className="text-xl font-semibold text-white border-b border-gray-800 pb-2">Detailed Task Breakdown</h3>
+                                    {selectedModel.allTasks.map((task, tIdx) => (
+                                        <div key={tIdx} className="bg-[#111] border border-gray-800 rounded-xl overflow-hidden">
+                                            <div className="bg-[#151515] border-b border-gray-800 p-4 flex justify-between items-center">
+                                                <div className="font-mono text-sm text-gray-300 font-bold">{task.id}</div>
+                                                <div className="flex gap-4 items-center">
+                                                    <div className="text-xs text-gray-500 font-mono">
+                                                        {task.time_sec}s {task.reasoning_len > 0 && `| ${task.reasoning_len} reasoning chars`}
+                                                    </div>
+                                                    <div className={`px-2 py-0.5 rounded text-xs font-bold font-mono border ${task.score === task.maxScore ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : task.score > 0 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'}`}>
+                                                        {task.score}/{task.maxScore}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="p-6 space-y-6">
+                                                <div>
+                                                    <div className="text-xs uppercase font-bold tracking-widest text-gray-600 mb-2">System / Prompt</div>
+                                                    <div className="bg-black/40 border border-gray-800 p-4 rounded-lg text-sm text-gray-400 font-mono whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
+                                                        {task.prompt}
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs uppercase font-bold tracking-widest text-gray-600 mb-2">Model Output</div>
+                                                    <div className="bg-[#0a0a0a] border border-gray-700 p-4 rounded-lg text-sm text-gray-200 font-mono whitespace-pre-wrap leading-relaxed shadow-inner max-h-96 overflow-y-auto">
+                                                        {task.response}
+                                                    </div>
+                                                </div>
+                                                {task.notes && (
+                                                    <div>
+                                                        <div className="text-xs uppercase font-bold tracking-widest text-gray-600 mb-2">Judge Notes / Failure Taxonomy</div>
+                                                        <div className="bg-blue-500/5 border border-blue-500/20 text-blue-400 p-3 rounded-lg text-sm font-mono">
+                                                            {task.notes}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
