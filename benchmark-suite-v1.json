@@ -1,0 +1,240 @@
+{
+  "id": "v1_original",
+  "name": "Original Benchmark Suite v1",
+  "trackCount": 5,
+  "taskCount": 15,
+  "tracks": [
+    {
+      "id": "v1_extraction",
+      "name": "Extraction",
+      "weight": 15,
+      "taskCount": 3,
+      "taskNames": [
+        "Extraction-1",
+        "Extraction-2",
+        "Extraction-3"
+      ],
+      "tasks": [
+        {
+          "id": "v1_extraction_extraction_1",
+          "name": "Extraction-1"
+        },
+        {
+          "id": "v1_extraction_extraction_2",
+          "name": "Extraction-2"
+        },
+        {
+          "id": "v1_extraction_extraction_3",
+          "name": "Extraction-3"
+        }
+      ]
+    },
+    {
+      "id": "v1_tool_routing",
+      "name": "Tool Routing",
+      "weight": 15,
+      "taskCount": 3,
+      "taskNames": [
+        "Tool Routing-1",
+        "Tool Routing-2",
+        "Tool Routing-3"
+      ],
+      "tasks": [
+        {
+          "id": "v1_tool_routing_tool routing_1",
+          "name": "Tool Routing-1"
+        },
+        {
+          "id": "v1_tool_routing_tool routing_2",
+          "name": "Tool Routing-2"
+        },
+        {
+          "id": "v1_tool_routing_tool routing_3",
+          "name": "Tool Routing-3"
+        }
+      ]
+    },
+    {
+      "id": "v1_reasoning",
+      "name": "Reasoning",
+      "weight": 15,
+      "taskCount": 3,
+      "taskNames": [
+        "Reasoning-1",
+        "Reasoning-2",
+        "Reasoning-3"
+      ],
+      "tasks": [
+        {
+          "id": "v1_reasoning_reasoning_1",
+          "name": "Reasoning-1"
+        },
+        {
+          "id": "v1_reasoning_reasoning_2",
+          "name": "Reasoning-2"
+        },
+        {
+          "id": "v1_reasoning_reasoning_3",
+          "name": "Reasoning-3"
+        }
+      ]
+    },
+    {
+      "id": "v1_summarization",
+      "name": "Summarization",
+      "weight": 15,
+      "taskCount": 3,
+      "taskNames": [
+        "Summarization-1",
+        "Summarization-2",
+        "Summarization-3"
+      ],
+      "tasks": [
+        {
+          "id": "v1_summarization_summarization_1",
+          "name": "Summarization-1"
+        },
+        {
+          "id": "v1_summarization_summarization_2",
+          "name": "Summarization-2"
+        },
+        {
+          "id": "v1_summarization_summarization_3",
+          "name": "Summarization-3"
+        }
+      ]
+    },
+    {
+      "id": "v1_general",
+      "name": "General",
+      "weight": 15,
+      "taskCount": 3,
+      "taskNames": [
+        "General-1",
+        "General-2",
+        "General-3"
+      ],
+      "tasks": [
+        {
+          "id": "v1_general_general_1",
+          "name": "General-1"
+        },
+        {
+          "id": "v1_general_general_2",
+          "name": "General-2"
+        },
+        {
+          "id": "v1_general_general_3",
+          "name": "General-3"
+        }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "v1_extraction_extraction_1",
+      "name": "Extraction-1",
+      "category": "Extraction",
+      "prompt": "Extract the following into strict JSON with keys company, contact, budget_usd, deadline, blockers, and next_steps. Email: 'Hi team, I'm Nora from Helix Foods. We can allocate up to $48,500 this quarter for warehouse vision tooling. Procurement closes on 2026-05-12. Main blockers are ERP integration uncertainty and lack of a pilot success metric. Next steps: send security docs, propose a 3-week pilot, and book a technical review with DevOps.' Return JSON only.",
+      "weight": 25
+    },
+    {
+      "id": "v1_extraction_extraction_2",
+      "name": "Extraction-2",
+      "category": "Extraction",
+      "prompt": "Read this memo and extract a markdown bullet list of every metric with its value and direction of change. Memo: 'Week 14: revenue reached $182k, up 12% week over week. Churn fell from 4.8% to 3.9%. NPS moved to 51 from 47. CAC increased by $19 to $143. Trial-to-paid conversion was flat at 8.4%. Support backlog dropped by 33 tickets to 71.'",
+      "weight": 25
+    },
+    {
+      "id": "v1_extraction_extraction_3",
+      "name": "Extraction-3",
+      "category": "Extraction",
+      "prompt": "From the text below, extract all dates, owners, and deliverables into a table with columns Date, Owner, Deliverable. Text: 'Amina will ship the pricing page rewrite by April 24. Ben owns the SOC2 evidence pack due April 29. Cara will deliver the partner onboarding playbook on May 2. The dry run happens April 22, facilitated by Diego.'",
+      "weight": 25
+    },
+    {
+      "id": "v1_tool routing_tool_routing_1",
+      "name": "Tool Routing-1",
+      "category": "Tool Routing",
+      "prompt": "You are an agent with tools: web_fetch(url), browser(url), image(path), pdf(path), exec(command). For the user request 'Read https://example.com/pricing, inspect the signup modal, and compare any plan details shown in the PDF brochure at /tmp/brochure.pdf', choose the best tool sequence and explain why each tool is used. Keep it concise.",
+      "weight": 25
+    },
+    {
+      "id": "v1_tool routing_tool_routing_2",
+      "name": "Tool Routing-2",
+      "category": "Tool Routing",
+      "prompt": "Pick the best tool for each subtask and give a numbered plan. Available tools: memory_search(query), web_search(query), web_fetch(url), browser(url), exec(command), spreadsheet(path). User asks: 'Find whether our team has discussed Acme Corp before, look up their latest funding news, open their careers page to see if they are hiring solutions engineers, and then analyze the CSV I uploaded.'",
+      "weight": 25
+    },
+    {
+      "id": "v1_tool routing_tool_routing_3",
+      "name": "Tool Routing-3",
+      "category": "Tool Routing",
+      "prompt": "An assistant can use browser, web_fetch, camofox, exec, and pdf. The user says: 'Log into the vendor portal if needed, download the April invoice PDF, and extract the total due.' Recommend the safest and most reliable tool path, including fallbacks, and state what should not be done prematurely.",
+      "weight": 25
+    },
+    {
+      "id": "v1_reasoning_reasoning_1",
+      "name": "Reasoning-1",
+      "category": "Reasoning",
+      "prompt": "A team can only ship one of three features this sprint. Feature A adds $70k expected ARR with 0.55 probability and takes 8 dev-days. Feature B adds $40k ARR with 0.8 probability and takes 3 dev-days. Feature C reduces churn worth $90k ARR-equivalent with 0.35 probability and takes 5 dev-days. If the team has 5 dev-days and wants maximum expected value per sprint while also preferring lower execution risk when values are close, which feature should they choose and why? Show the math briefly.",
+      "weight": 25
+    },
+    {
+      "id": "v1_reasoning_reasoning_2",
+      "name": "Reasoning-2",
+      "category": "Reasoning",
+      "prompt": "You manage a queue with jobs J1 to J5. Dependencies: J3 after J1, J4 after J2 and J3, J5 after J1. Durations in hours: J1=2, J2=4, J3=3, J4=2, J5=5. Two workers can operate in parallel. Give the minimum completion time and one valid schedule.",
+      "weight": 25
+    },
+    {
+      "id": "v1_reasoning_reasoning_3",
+      "name": "Reasoning-3",
+      "category": "Reasoning",
+      "prompt": "A startup has $120k cash, burns $18k per month now, and can choose one of two experiments. Experiment X costs $24k once and has a 40% chance of reducing burn by $6k/month starting next month. Experiment Y costs $10k once and has a 25% chance of increasing monthly revenue enough to offset $9k/month starting in two months. Which experiment gives better expected 6-month cash preservation, and what is the expected difference?",
+      "weight": 25
+    },
+    {
+      "id": "v1_summarization_summarization_1",
+      "name": "Summarization-1",
+      "category": "Summarization",
+      "prompt": "Summarize this update for a CEO in exactly 4 bullets, each under 18 words: 'Engineering finished SSO, but audit logs slipped due to a schema migration issue. Sales closed Northstar Bank for $96k ARR and moved Ridgeway to legal. Customer success reported two escalations, both tied to slow imports on large CSVs. Marketing launched the attribution report, early CTR is 2.9%, and webinar registrations hit 418.'",
+      "weight": 25
+    },
+    {
+      "id": "v1_summarization_summarization_2",
+      "name": "Summarization-2",
+      "category": "Summarization",
+      "prompt": "Compress the following into a terse executive summary with sections: Wins, Risks, Decisions Needed. Text: 'The migration cut page latency from 1.8s to 1.1s. However, error rates spiked for legacy API keys, affecting 7 enterprise tenants. Support volume rose 14% after the billing UI refresh because invoice exports moved. Product wants approval to delay custom roles by one sprint so the team can stabilize billing and legacy auth.'",
+      "weight": 25
+    },
+    {
+      "id": "v1_summarization_summarization_3",
+      "name": "Summarization-3",
+      "category": "Summarization",
+      "prompt": "Turn this transcript into meeting notes with headings Summary, Decisions, Action Items. Transcript: 'We agreed to keep annual pricing unchanged through Q2. Jade will draft the partner reseller addendum by Thursday. Omar will gather churn reasons from the top 15 lost deals. We are not expanding the pilot scope until uptime stays above 99.9% for 30 days.'",
+      "weight": 25
+    },
+    {
+      "id": "v1_general_general_1",
+      "name": "General-1",
+      "category": "General",
+      "prompt": "Write a short but sharp reply to this client message: 'Your proposal looks promising, but we're worried the rollout will distract our ops team. Also, your pricing feels high versus doing this internally.' The reply should acknowledge concern, reduce rollout fear, defend value without sounding defensive, and end with a concrete next step.",
+      "weight": 25
+    },
+    {
+      "id": "v1_general_general_2",
+      "name": "General-2",
+      "category": "General",
+      "prompt": "Draft a 6-line internal Slack update announcing that the team is pausing a feature launch for one week due to a critical reliability fix. Tone: calm, accountable, no drama, confidence intact.",
+      "weight": 25
+    },
+    {
+      "id": "v1_general_general_3",
+      "name": "General-3",
+      "category": "General",
+      "prompt": "Create a compact decision memo recommending whether to hire a founding solutions engineer now or wait 3 months. Assume pipeline is growing fast, founders are handling demos, and onboarding docs are weak. Include recommendation, rationale, risks, and mitigation.",
+      "weight": 25
+    }
+  ]
+}
