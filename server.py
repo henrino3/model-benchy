@@ -44,6 +44,7 @@ function App() {
   const [payload, setPayload] = React.useState(null);
   const [selectedModel, setSelectedModel] = React.useState(null);
   const [showCloud, setShowCloud] = React.useState(false);
+  const [suiteFilter, setSuiteFilter] = React.useState('v3');
   const path = window.location.pathname; const modelNameFromPath = path.startsWith('/model/') ? decodeURIComponent(path.replace('/model/','')) : null;
 
   React.useEffect(() => {
@@ -52,10 +53,13 @@ function App() {
 
   if (!payload) return <div className="min-h-screen flex items-center justify-center font-mono text-gray-500">Loading...</div>;
 
-  const allRuns = payload.index?.models || [];
+  const rawAll = payload.index?.models || [];
+  const allRuns = suiteFilter === 'all' ? rawAll : rawAll.filter(r => suiteFilter === 'v1' ? (r.taskCount || 0) <= 5 : (r.taskCount || 0) > 5);
   const runs = showCloud ? allRuns : allRuns.filter(r => !r.isCloud);
   const suite = payload.suite || {};
   const cloudCount = allRuns.filter(r => r.isCloud).length;
+  const v1Count = rawAll.filter(r => (r.taskCount || 0) <= 5).length;
+  const v3Count = rawAll.filter(r => (r.taskCount || 0) > 5).length;
 
   if (path.startsWith('/model/')) {
     const modelRow = runs.find(r => r.model === modelNameFromPath);
@@ -213,11 +217,18 @@ function App() {
             <p className="text-sm text-gray-400 mt-1">Model benchmark leaderboard</p>
           </div>
           <div className="flex items-center gap-4">
+            <div className="flex rounded-lg overflow-hidden border border-gray-700 text-xs font-mono">
+              {['v3','v1','all'].map(s => (
+                <button key={s} onClick={() => setSuiteFilter(s)} className={`px-3 py-1.5 ${suiteFilter===s ? 'bg-blue-600 text-white' : 'bg-[#111] text-gray-400 hover:text-white'}`}>
+                  {s.toUpperCase()}{s==='v1' ? ` (${v1Count})` : s==='v3' ? ` (${v3Count})` : ''}
+                </button>
+              ))}
+            </div>
             <label className="flex items-center gap-2 text-sm font-mono cursor-pointer select-none">
               <input type="checkbox" checked={showCloud} onChange={() => setShowCloud(!showCloud)} className="accent-blue-500" />
-              <span className="text-gray-400">Cloud ({cloudCount})</span>
+              <span className="text-gray-400">☁️ ({cloudCount})</span>
             </label>
-            <a href="/tests" className="text-sm font-mono text-blue-300 hover:text-blue-200">whole test →</a>
+            <a href="/tests" className="text-sm font-mono text-blue-300 hover:text-blue-200">tests →</a>
           </div>
         </div>
       </header>
