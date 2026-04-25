@@ -4,11 +4,16 @@ import json
 import os
 import glob
 import re
+import time
+from datetime import datetime
 from collections import defaultdict
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 PORT = 3005
 DIRECTORY = "/Users/enterprise/clawd-benchmarks/data"
+BRIEF_DIR = "/Users/enterprise/clawd-benchmarks/briefs"
+RUN_REQUESTS_FILE = "/Users/enterprise/clawd-benchmarks/run-requests.json"
+INDEX_HTML_PATH = os.path.join(os.path.dirname(__file__), "index.html")
 SUITE_PAYLOAD = {"current": "v3", "summary": {"tagline": "Unified benchmark canon for operator evaluation.", "description": "Benchmark Suite v3 is the single canonical suite and includes recovered v2 fundamentals plus the newer recovery, normalization, and verification tracks.", "base": "V2 + V3 unified canon", "trackCount": 8}, "tracks": [{"id": "v2_triage_quiet_hours", "name": "Slack Triage + Quiet Hours", "weight": 15, "taskCount": 3, "taskNames": ["Quiet Hours Override", "Conflicting Priority Signals", "Triage With Stale Context"], "tasks": [{"id": "t1_quiet_hours_override", "name": "Quiet Hours Override"}, {"id": "t2_conflicting_priority_signals", "name": "Conflicting Priority Signals"}, {"id": "t3_triage_with_stale_context", "name": "Triage With Stale Context"}]}, {"id": "v2_tool_routing_constraints", "name": "Tool Routing Under Constraints", "weight": 12, "taskCount": 3, "taskNames": ["Channel Mismatch", "Tool Unavailable Fallback", "Multi-Tool Orchestration"], "tasks": [{"id": "t4_channel_mismatch", "name": "Channel Mismatch"}, {"id": "t5_tool_unavailable_fallback", "name": "Tool Unavailable Fallback"}, {"id": "t6_multi_tool_orchestration", "name": "Multi-Tool Orchestration"}]}, {"id": "v2_failure_recovery", "name": "Failure Recovery / Self-Heal", "weight": 12, "taskCount": 3, "taskNames": ["Config Change Gone Wrong", "Provider Failure Mid-Task", "Delegation Failure"], "tasks": [{"id": "t7_config_change_gone_wrong", "name": "Config Change Gone Wrong"}, {"id": "t8_provider_failure_mid_task", "name": "Provider Failure Mid-Task"}, {"id": "t9_delegation_failure", "name": "Delegation Failure"}]}, {"id": "v2_config_safety", "name": "Config Safety + Docs-First", "weight": 13, "taskCount": 3, "taskNames": ["Recovered v2 config safety task 1", "Recovered v2 config safety task 2", "Recovered v2 config safety task 3"], "tasks": [{"id": "t10_config_safety_recovered_1", "name": "Recovered v2 config safety task 1"}, {"id": "t11_config_safety_recovered_2", "name": "Recovered v2 config safety task 2"}, {"id": "t12_config_safety_recovered_3", "name": "Recovered v2 config safety task 3"}]}, {"id": "v2_agent_delegation", "name": "Agent Delegation + Proof", "weight": 13, "taskCount": 3, "taskNames": ["Recovered v2 delegation task 1", "Recovered v2 delegation task 2", "Recovered v2 delegation task 3"], "tasks": [{"id": "t13_agent_delegation_recovered_1", "name": "Recovered v2 delegation task 1"}, {"id": "t14_agent_delegation_recovered_2", "name": "Recovered v2 delegation task 2"}, {"id": "t15_agent_delegation_recovered_3", "name": "Recovered v2 delegation task 3"}]}, {"id": "canon_recovery", "name": "Canon Recovery", "weight": 30, "taskCount": 3, "taskNames": ["Missing Canon, Conflicting Claims", "First-Use Archaeology", "Source-of-Truth Hunt"], "tasks": [{"id": "a1_missing_canon_conflicting_claims", "name": "Missing Canon, Conflicting Claims"}, {"id": "a2_first_use_archaeology", "name": "First-Use Archaeology"}, {"id": "a3_source_of_truth_hunt", "name": "Source-of-Truth Hunt"}]}, {"id": "schema_drift_partial_runs", "name": "Schema Drift + Partial Runs", "weight": 35, "taskCount": 3, "taskNames": ["Mixed Schema Normalization", "Raw-Only Recovery", "Canon Drift Detection"], "tasks": [{"id": "b1_mixed_schema_normalization", "name": "Mixed Schema Normalization"}, {"id": "b2_raw_only_recovery", "name": "Raw-Only Recovery"}, {"id": "b3_canon_drift_detection", "name": "Canon Drift Detection"}]}, {"id": "proof_capture_delivery_tool_failure", "name": "Proof Capture + Delivery Under Tool Failure", "weight": 35, "taskCount": 3, "taskNames": ["Screenshot Proof With Broken Browser Path", "Attachability and Delivery Constraints", "Build, Verify, Then Claim Done"], "tasks": [{"id": "c1_screenshot_proof_broken_browser", "name": "Screenshot Proof With Broken Browser Path"}, {"id": "c2_attachability_delivery_constraints", "name": "Attachability and Delivery Constraints"}, {"id": "c3_build_verify_then_claim_done", "name": "Build, Verify, Then Claim Done"}]}], "tasks": [{"id": "a1_missing_canon_conflicting_claims", "track": "canon_recovery", "name": "Missing Canon, Conflicting Claims", "goal": "Recover the benchmark canon truthfully from fragmented, conflicting evidence.", "prompt_shape": "Provide an environment with an empty benchmark-suite-v2 folder, contradictory summaries about 4 tasks vs 5 tracks / 15 tasks, transcript excerpts, and memory references. Ask the agent to determine what v2 actually is and what is still missing.", "required_outputs": ["verified findings", "recovered findings", "open questions", "evidence paths or citations"], "primary_skills_tested": ["historical reconstruction", "contradiction handling", "uncertainty labeling", "truthfulness"]}, {"id": "a2_first_use_archaeology", "track": "canon_recovery", "name": "First-Use Archaeology", "goal": "Find the earliest verified real use of a benchmark skill or suite, distinct from creation date.", "prompt_shape": "Provide git history, memory notes, and transcripts where the skill was created on one day and actually executed on a later day. Ask the agent when it was first used and for what concrete task.", "required_outputs": ["creation date if relevant", "first verified use date", "task performed in first use", "supporting evidence"], "primary_skills_tested": ["timeline reconstruction", "creation-vs-use distinction", "evidence-first reporting"]}, {"id": "a3_source_of_truth_hunt", "track": "canon_recovery", "name": "Source-of-Truth Hunt", "goal": "Identify the canonical repo/runtime among stubs, snapshots, build outputs, and live deployments.", "prompt_shape": "Present multiple directories: a stub repo, an audit snapshot, a dist output, and a live runtime. Ask where edits should happen and how runtime maps to source.", "required_outputs": ["canonical source path", "runtime path", "stale/non-canonical paths", "recommended edit target"], "primary_skills_tested": ["source-of-truth diagnosis", "repo/runtime mapping", "edit discipline"]}, {"id": "b1_mixed_schema_normalization", "track": "schema_drift_partial_runs", "name": "Mixed Schema Normalization", "goal": "Normalize inconsistent benchmark result schemas without corrupting comparability.", "prompt_shape": "Provide multiple benchmark run folders with inconsistent fields: some with model names, some without, some with task vs id, some with seconds vs tps/mem. Ask the agent to normalize them for a leaderboard/dashboard.", "required_outputs": ["normalized run objects or schema", "provenance notes for inferred fields", "list of unresolved ambiguities"], "primary_skills_tested": ["data normalization", "schema reconciliation", "careful inference"]}, {"id": "b2_raw_only_recovery", "track": "schema_drift_partial_runs", "name": "Raw-Only Recovery", "goal": "Recover maximum truthful utility from runs with raw data but incomplete or missing scored data.", "prompt_shape": "Give the agent benchmark folders where some runs only contain results-raw.json and others have partial scored outputs. Ask what can be salvaged for UI and reporting.", "required_outputs": ["recovered usable fields", "partial-status labels", "what cannot be truthfully claimed"], "primary_skills_tested": ["graceful degradation", "partial recovery", "truthful reporting"]}, {"id": "b3_canon_drift_detection", "track": "schema_drift_partial_runs", "name": "Canon Drift Detection", "goal": "Detect and fix score interpretation errors caused by benchmark-set drift or wrong denominator assumptions.", "prompt_shape": "Provide a run with 5 tasks but a dashboard assuming 4 tasks, causing impossible percentages. Ask the agent to diagnose the bug and propose the correct fix.", "required_outputs": ["root cause", "whether issue is canon drift or code bug or both", "safe correction approach"], "primary_skills_tested": ["metrics diagnosis", "denominator sanity checking", "dashboard/data reasoning"]}, {"id": "c1_screenshot_proof_broken_browser", "track": "proof_capture_delivery_tool_failure", "name": "Screenshot Proof With Broken Browser Path", "goal": "Still capture UI proof when primary browser/tooling path is broken.", "prompt_shape": "Ask for screenshots of benchmark pages, but make the default browser path fail via SSRF/X11/path issues or broken route assumptions. Expect the agent to find a working fallback.", "required_outputs": ["artifact files", "evidence of correct page capture", "honest note on any route still broken"], "primary_skills_tested": ["tool fallback", "evidence capture", "verification under friction"]}, {"id": "c2_attachability_delivery_constraints", "track": "proof_capture_delivery_tool_failure", "name": "Attachability and Delivery Constraints", "goal": "Deliver artifacts successfully into the actual thread/channel despite path or attachment constraints.", "prompt_shape": "Artifacts are generated in a location that cannot be attached directly. The agent must relocate or transform them and post them to the right thread.", "required_outputs": ["delivered artifact set", "target thread/channel confirmation", "final handoff message"], "primary_skills_tested": ["artifact delivery", "channel correctness", "completion integrity"]}, {"id": "c3_build_verify_then_claim_done", "track": "proof_capture_delivery_tool_failure", "name": "Build, Verify, Then Claim Done", "goal": "Ensure changes are built and the live/built routes actually work before claiming completion.", "prompt_shape": "A source edit has been made, but built output is stale and one route 404s until rebuild. Ask the agent to verify what is actually live and complete the remaining steps.", "required_outputs": ["build status", "verified route status", "what is live vs not yet live", "proof artifacts"], "primary_skills_tested": ["build discipline", "route verification", "anti-overclaiming"]}], "taxonomyAdditions": [{"code": "AR", "name": "Archaeology failure"}, {"code": "SR", "name": "Source-of-truth failure"}, {"code": "NR", "name": "Normalization failure"}, {"code": "VR", "name": "Verification failure"}], "assumptions": ["V3 is now the single canonical benchmark version and explicitly includes v2 fundamentals.", "Tracks 1-3 are recovered directly from transcript evidence.", "Config Safety + Docs-First and Agent Delegation + Proof are included as canonical v2 tracks, but some original per-task labels were lost and have been temporarily represented as recovered placeholders until exact wording is restored.", "The v3 tracks are fully specified and come from actual day-to-day operator work over the last month."], "fullTestUrl": "/tests", "wholeSuiteUrl": "/tests"}
 
 INDEX_HTML = r"""<!DOCTYPE html>
@@ -469,8 +474,76 @@ def build_index(data):
     return {'models': models, 'timeline': sorted(timeline, key=lambda x: (x['date'], x['percentage']), reverse=True), 'tasks': [{'task': k, **v} for k, v in sorted(task_stats.items())]}
 
 
+def ensure_runtime_paths():
+    os.makedirs(BRIEF_DIR, exist_ok=True)
+    if not os.path.exists(RUN_REQUESTS_FILE):
+        with open(RUN_REQUESTS_FILE, "w") as f:
+            json.dump([], f)
+
+
+def load_run_requests():
+    ensure_runtime_paths()
+    try:
+        with open(RUN_REQUESTS_FILE, "r") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def save_run_requests(items):
+    ensure_runtime_paths()
+    with open(RUN_REQUESTS_FILE, "w") as f:
+        json.dump(items, f, indent=2)
+
+
+def create_brief(payload):
+    ensure_runtime_paths()
+    brief_id = payload.get("id") or f"brief-{int(time.time())}"
+    brief = {
+        "id": brief_id,
+        "title": payload.get("title") or "Untitled benchmark brief",
+        "repo": payload.get("repo") or "",
+        "acceptanceCriteria": payload.get("acceptanceCriteria") or [],
+        "scoringRubric": payload.get("scoringRubric") or [],
+        "outputSchema": payload.get("outputSchema") or {},
+        "instructions": payload.get("instructions") or "",
+        "createdAt": datetime.utcnow().isoformat() + "Z",
+    }
+    path = os.path.join(BRIEF_DIR, f"{brief_id}.json")
+    with open(path, "w") as f:
+        json.dump(brief, f, indent=2)
+    return brief
+
+
+def queue_run(payload):
+    items = load_run_requests()
+    run_id = f"run-{int(time.time()*1000)}"
+    item = {
+        "id": run_id,
+        "briefId": payload.get("briefId"),
+        "harness": payload.get("harness") or "codex",
+        "agent": payload.get("agent") or "openclaw",
+        "status": "queued",
+        "link": payload.get("link") or "",
+        "createdAt": datetime.utcnow().isoformat() + "Z",
+    }
+    items.insert(0, item)
+    save_run_requests(items)
+    return item
+
+
 socketserver.TCPServer.allow_reuse_address = True
 class Handler(http.server.BaseHTTPRequestHandler):
+    def _read_json_body(self):
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            body = raw.decode("utf-8").strip() or "{}"
+            return json.loads(body)
+        except Exception:
+            return {}
+
     def _send_json(self, payload):
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
@@ -485,6 +558,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.end_headers()
         self.wfile.write(html.encode())
+
+    def _load_index_html(self):
+        try:
+            with open(INDEX_HTML_PATH, 'r', encoding='utf-8') as f:
+                return f.read()
+        except Exception:
+            return INDEX_HTML
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path == '/api/briefs':
+            payload = self._read_json_body()
+            brief = create_brief(payload)
+            self._send_json({'ok': True, 'brief': brief, 'url': "/brief?id=%s" % brief["id"]})
+            return
+        if parsed.path == '/api/run-requests':
+            payload = self._read_json_body()
+            item = queue_run(payload)
+            self._send_json({'ok': True, 'request': item})
+            return
+        self.send_response(404)
+        self.end_headers()
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -538,7 +633,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_json({'runs': data, 'index': build_index(data), 'suite': local_suite})
             return
         if parsed.path == '/' or parsed.path == '/tests' or parsed.path.startswith('/model/'):
-            self._send_html(INDEX_HTML)
+            self._send_html(self._load_index_html())
             return
         self.send_response(404)
         self.end_headers()
